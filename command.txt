@@ -8,11 +8,15 @@ npm install dotenv
 
 npx hardhat test
 
+npm install @openzeppelin/contracts
+
 npx hardhat ignition deploy ignition/modules/Counter.ts
 
 npx hardhat ignition deploy --network localhost ignition/modules/Counter.ts
 
 npx hardhat ignition deploy --network bscTestnet ignition/modules/Counter.ts
+
+npx hardhat ignition deploy --network bscTestnet --reset ignition/modules/TradeEscrowVault.ts
 
 npx hardhat ignition deploy --network bscTestnet --reset
 
@@ -22,3 +26,6 @@ npx hardhat ignition deploy --network bscTestnet --reset ignition/modules/Counte
 
 bscTestnet
 
+
+
+AccessControlModuleModule#AccessControlModule - 0x3395f79b9340ee73dD2a99f212912243De695D2a

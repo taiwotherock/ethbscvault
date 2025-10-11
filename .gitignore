@@ -2,7 +2,7 @@
 /node_modules
 
 .env
-secret.json
+secrets.json
 
 # Compilation output
 /dist

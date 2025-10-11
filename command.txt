@@ -1,0 +1,24 @@
+
+
+npm init -y
+
+npm install --save-dev hardhat
+
+npm install dotenv
+
+npx hardhat test
+
+npx hardhat ignition deploy ignition/modules/Counter.ts
+
+npx hardhat ignition deploy --network localhost ignition/modules/Counter.ts
+
+npx hardhat ignition deploy --network bscTestnet ignition/modules/Counter.ts
+
+npx hardhat ignition deploy --network bscTestnet --reset
+
+npx hardhat ignition deploy --network bscTestnet --reset ignition/modules/Counter.ts
+
+npx hardhat ignition deploy --network bscTestnet --reset ignition/modules/Counter.ts
+
+bscTestnet
+

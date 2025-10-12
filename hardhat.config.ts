@@ -58,7 +58,7 @@ const config: HardhatUserConfig = {
       gasPrice: 1000000000,
     },
     // for testnet
-    'base-sepolia': {
+    basesepolia: {
       type: "http",
       url: 'https://sepolia.base.org',
       accounts: {mnemonic: mnemonic},

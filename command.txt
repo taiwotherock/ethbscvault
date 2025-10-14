@@ -34,6 +34,9 @@ npx hardhat ignition deploy --network bscTestnet --reset ignition/modules/Counte
 
 bscTestnet
 
+npx hardhat ignition deploy --network basesepolia --reset ignition/modules/AccessControlModule.ts
+npx hardhat ignition deploy --network basesepolia --reset ignition/modules/VaultLending.ts
+
 
 
 AccessControlModuleModule#AccessControlModule - 0x3395f79b9340ee73dD2a99f212912243De695D2a

@@ -30,6 +30,7 @@ contract VaultLending {
         uint256 fee;             // remaining fee
         uint256 totalPaid;       // total repaid (principal + fee)
         bool active;
+        bool disbursed;
     }
 
      // ====== Timelock ======
@@ -43,7 +44,7 @@ contract VaultLending {
 
 
     uint256 private nextLoanId = 1;
-     IAccessControlModule public immutable accessControl;
+    IAccessControlModule public immutable accessControl;
     bool public paused;
     uint256 private _locked;
 
@@ -73,7 +74,7 @@ contract VaultLending {
     // Events
     event Deposit(address indexed user, address indexed token, uint256 amount);
     event Withdraw(address indexed user, address indexed token, uint256 amount);
-    event LoanCreated(bytes32 loanId, address borrower, uint256 principal, uint256 fee);
+    event LoanCreated(bytes32 loanId, address borrower, uint256 principal, uint256 fee,uint256 depositAmount);
     event LoanDisbursed(bytes32 loanId, address borrower, uint256 amount);
     event LoanRepaid(bytes32 loanId, address borrower, uint256 amount, uint256 feePaid);
     event LoanClosed(bytes32 loanId, address borrower);
@@ -89,6 +90,8 @@ contract VaultLending {
 
     mapping(address => bool) public whitelist;
     mapping(address => bool) public blacklist;
+       // ✅ Reentrancy guard per loan
+    mapping(bytes32 => bool) private _loanLock;
 
 
     constructor(address _accessControl) {
@@ -136,6 +139,18 @@ contract VaultLending {
         _;
     }
 
+    modifier nonReentrantLoan(bytes32 ref) {
+        require(!_loanLock[ref], "ReentrancyGuard: loan locked");
+        _loanLock[ref] = true;
+        _;
+        _loanLock[ref] = false;
+    }
+
+    modifier onlyActiveLoan(bytes32 ref) {
+        require(loans[ref].active, "Loan not active");
+        _;
+    }
+
     // ====== Admin: Whitelist / Blacklist ======
     function setWhitelist(address user, bool status) external onlyAdmin {
         whitelist[user] = status;
@@ -157,6 +172,8 @@ contract VaultLending {
         paused = false;
         emit Unpaused();
     }
+
+
 
     /* ========== VAULT FUNCTIONS ========== */
 
@@ -181,8 +198,9 @@ contract VaultLending {
     }
 
     function withdrawFromVault(address token, uint256 amount) external 
-    whenNotPaused notBlacklisted(msg.sender) onlyWhitelisted(msg.sender) {
+    whenNotPaused notBlacklisted(msg.sender) onlyWhitelisted(msg.sender)  {
         require(vault[msg.sender][token] >= amount, "Insufficient vault balance");
+        require(_getTotalOutstanding(msg.sender) == 0, "has outstanding loan" );
 
         // Update lender contribution and pool
         vault[msg.sender][token] -= amount;
@@ -195,20 +213,34 @@ contract VaultLending {
          IERC20 tokenA = IERC20(token);
         //IERC20(token).transfer(msg.sender, amount);
         // Safe transfer with inline revert check
-            (bool success, bytes memory data) = address(tokenA).call(
+           /*(bool success, bytes memory data) = address(tokenA).call(
                 abi.encodeWithSelector(tokenA.transfer.selector, msg.sender, amount)
-            );
+            );*/
+
+        _safeTransfer(tokenA, msg.sender, amount);
 
         emit Withdraw(msg.sender, token, amount);
     }
 
+    function _safeTransfer(IERC20 token, address to, uint256 value) internal {
+        (bool success, bytes memory data) =
+            address(token).call(abi.encodeWithSelector(token.transfer.selector, to, value));
+        require(success && (data.length == 0 || abi.decode(data, (bool))), "SafeTransfer: failed");
+    }
+
+    function _safeTransferFrom(IERC20 token, address from, address to, uint256 value) internal {
+        (bool success, bytes memory data) =
+            address(token).call(abi.encodeWithSelector(token.transferFrom.selector, from, to, value));
+        require(success && (data.length == 0 || abi.decode(data, (bool))), "SafeTransferFrom: failed");
+    }
+
     /* ========== LOAN FUNCTIONS ========== */
 
-    function createLoan(bytes32 ref,address token, address merchant, uint256 principal, uint256 fee)
+    function createLoan(bytes32 ref,address token, address merchant, uint256 principal,
+     uint256 fee, uint256 depositAmount)
      external onlyCreditOfficer {
         require(pool[token] >= principal, "Insufficient pool liquidity");
 
-        
         Loan storage l = loans[ref];
         l.ref = ref;
         l.borrower = msg.sender;
@@ -219,8 +251,9 @@ contract VaultLending {
         l.startedAt = block.timestamp;
         l.installmentsPaid = 0;
         l.fee = fee;
-        l.totalPaid = 0;
+        l.totalPaid = depositAmount;
         l.active = true;
+        l.disbursed = false;
 
 
         // Track borrower
@@ -235,9 +268,33 @@ contract VaultLending {
         pool[token] -= principal;
         vault[msg.sender][token] += principal;
 
-        emit LoanCreated(ref, msg.sender, principal, fee);
-        emit LoanDisbursed(ref, msg.sender, principal);
+        emit LoanCreated(ref, msg.sender, principal, fee,depositAmount);
+        //emit LoanDisbursed(ref, msg.sender, principal);
     }
+
+      /// ✅ Disburse loan (principal - fee) to merchant safely
+    function disburseLoanToMerchant(bytes32 ref) external onlyCreditOfficer
+        nonReentrantLoan(ref) onlyActiveLoan(ref) {
+        Loan storage l = loans[ref];
+        require(!l.disbursed, "Loan already disbursed");
+        require(l.merchant != address(0), "Invalid merchant address");
+        require(l.token != address(0), "Invalid token address");
+        require(l.principal > 0, "Invalid principal");
+
+        uint256 amountToSend = l.principal > l.fee ? l.principal - l.fee : 0;
+        require(amountToSend > 0, "No funds to send");
+
+        // ✅ Ensure vault (contract) has enough balance of the token
+        uint256 vaultBalance = IERC20(l.token).balanceOf(address(this));
+        require(vaultBalance >= amountToSend, "Insufficient vault balance");
+
+        // ✅ Mark before transfer to prevent duplicate
+        l.disbursed = true;
+
+        bool success = IERC20(l.token).transfer(l.merchant, amountToSend);
+        require(success, "Token transfer failed");
+    }
+
 
     function repayLoan(bytes32 ref, uint256 amount) external {
         Loan storage loan = loans[ref];
@@ -312,7 +369,8 @@ contract VaultLending {
         return withdrawable;
     }
 
-    function withdrawFees(address token) external {
+    function withdrawFees(address token) external 
+    whenNotPaused notBlacklisted(msg.sender) onlyWhitelisted(msg.sender) {
         uint256 amount = getWithdrawableFees(msg.sender, token);
         require(amount > 0, "No fees to withdraw");
 
@@ -404,6 +462,26 @@ contract VaultLending {
         return lenders;
     }
 
+
+        // 🔹 INTERNAL function — reusable inside contract
+        function _getTotalOutstanding(address borrower) internal view returns (uint256 totalOutstanding) {
+            bytes32[] storage ids = borrowerLoans[borrower];
+            uint256 len = ids.length;
+
+            for (uint256 i = 0; i < len; i++) {
+                Loan storage l = loans[ids[i]];
+                if (l.active) {
+                    totalOutstanding += l.outstanding;
+                }
+            }
+        }
+
+        // 🔹 EXTERNAL function — exposed to other contracts or frontends
+        function getTotalOutstanding(address borrower) external view returns (uint256) {
+            return _getTotalOutstanding(borrower);
+        }
+
+   
     function getLoans(address borrower) external view returns (Loan[] memory) {
         bytes32[] memory ids = borrowerLoans[borrower];
         Loan[] memory result = new Loan[](ids.length);

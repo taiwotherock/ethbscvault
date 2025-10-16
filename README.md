@@ -1,57 +1,111 @@
-# Sample Hardhat 3 Beta Project (`node:test` and `viem`)
+# Borderless Fuse Pay — VaultLending.sol README
 
-This project showcases a Hardhat 3 Beta project using the native Node.js test runner (`node:test`) and the `viem` library for Ethereum interactions.
+> Solidity-based vault + lending contract for pooled lender funds and simple on-chain loan lifecycle.
+>
+> This README documents the exact Solidity code you provided (`VaultLending`), explains its architecture, usage examples (ethers.js), important modifiers/events, security notes, and testing / deployment tips.
 
-To learn more about the Hardhat 3 Beta, please visit the [Getting Started guide](https://hardhat.org/docs/getting-started#getting-started-with-hardhat-3). To share your feedback, join our [Hardhat 3 Beta](https://hardhat.org/hardhat3-beta-telegram-group) Telegram group or [open an issue](https://github.com/NomicFoundation/hardhat/issues/new) in our GitHub issue tracker.
+---
 
-## Project Overview
+## ✅ What this contract does (high level)
 
-This example project includes:
+- Allows **lenders** to deposit ERC-20 tokens into a vault (`depositToVault`) and later **withdraw** (`withdrawFromVault`).
+- Tracks lender **contributions** and maintains an internal fee accounting system so lenders can **withdraw earned fees** (`withdrawFees`).
+- **Credit officers** (an off-chain Access Control module is used) can **create loans** for whitelisted borrowers and merchants (`createLoan`) and **disburse** loan principal to merchants (`disburseLoanToMerchant`).
+- **Borrowers** can **repay loans** either using funds in their vault balance or by transferring tokens (`repayLoan`), which allocates fees to the fee pool for lenders.
+- Admin functions allow **whitelisting / blacklisting** and **pausing** the contract.
+- Includes view helpers: `getLoans`, `getBorrowerStats`, `getLenderStats`, `getProtocolStats`, and helpers to list all borrowers / lenders.
 
-- A simple Hardhat configuration file.
-- Foundry-compatible Solidity unit tests.
-- TypeScript integration tests using [`node:test`](nodejs.org/api/test.html), the new Node.js native test runner, and [`viem`](https://viem.sh/).
-- Examples demonstrating how to connect to different types of networks, including locally simulating OP mainnet.
+---
 
-## Usage
+## Key design notes & assumptions
 
-### Running Tests
+- **Access control** is externalized via an `IAccessControlModule` interface. The contract expects the provided access-control address to implement:
+  ```solidity
+  function isAdmin(address account) external view returns (bool);
+  function isCreditOfficer(address account) external view returns (bool);
+  ```
+  The deployer must pass a valid address on construction.
 
-To run all the tests in the project, execute the following command:
+- The contract **is fee-driven** (no interest model in code). Fees are expected to be specified at loan creation and are distributed to lenders via `cumulativeFeePerToken`.
 
-```shell
-npx hardhat test
+- Lending and fee accounting are token-specific (per ERC-20 token address).
+
+- The contract uses a simple **reentrancy guard** (`_locked`) and a per-loan lock `_loanLock[ref]`.
+
+- Many functions require addresses to be **whitelisted** (`onlyWhitelisted`) and not blacklisted (`notBlacklisted`) before certain actions.
+
+---
+
+## Example usage (ethers.js)
+```js
+// assume ethers and a provider/signer are configured
+const vaultAbi = [ /* ABI of VaultLending (compile the contract to get ABI) */ ];
+const vaultAddr = "0x..."; // deployed contract
+const tokenAddr = "0x..."; // ERC20 token
+
+const signer = provider.getSigner(); // lender / borrower / credit officer depending on call
+const vault = new ethers.Contract(vaultAddr, vaultAbi, signer);
+
+// Lender deposits
+const token = new ethers.Contract(tokenAddr, erc20Abi, signer);
+await token.approve(vaultAddr, ethers.utils.parseUnits("1000", 18));
+await vault.depositToVault(tokenAddr, ethers.utils.parseUnits("1000", 18));
+
+// Credit officer creates a loan
+const creditOfficer = vault.connect(creditOfficerSigner);
+const ref = ethers.utils.formatBytes32String("loan-0001");
+await creditOfficer.createLoan(ref, tokenAddr, merchantAddress, ethers.utils.parseUnits("500", 18), ethers.utils.parseUnits("50",18), ethers.utils.parseUnits("50",18), borrowerAddress);
+
+// Disburse loan to merchant
+await creditOfficer.disburseLoanToMerchant(ref);
+
+// Borrower repays
+await vault.connect(borrowerSigner).repayLoan(ref, ethers.utils.parseUnits("550",18));
+
+// Lender withdraw fees
+await vault.connect(lenderSigner).withdrawFees(tokenAddr);
 ```
 
-You can also selectively run the Solidity or `node:test` tests:
+---
 
-```shell
-npx hardhat test solidity
-npx hardhat test nodejs
-```
+## Deployment notes
+- Constructor requires `accessControl` address.
+- Compile with Solidity `^0.8.20`.
+- Provide ERC-20 tokens for testing (use `MockERC20`).
+- Gas: consider scalability for lender/borrower loops.
 
-### Make a deployment to Sepolia
+---
 
-This project includes an example Ignition module to deploy the contract. You can deploy this module to a locally simulated chain or to Sepolia.
+## Security & operational considerations
+1. Token compatibility — ensure ERC20 standard compliance.
+2. External access control must be secure.
+3. Whitelist bootstrap needed.
+4. Fee accounting rounding needs validation.
+5. BorrowerLoans uses `msg.sender` in `createLoan` — fix before production.
+6. On-chain loops may hit gas limits — use off-chain indexers.
+7. Reserve fund not implemented.
+8. Timelock struct present but unused.
+9. Review all reentrancy patterns before mainnet.
 
-To run the deployment to a local chain:
+---
 
-```shell
-npx hardhat ignition deploy ignition/modules/Counter.ts
-```
+## Suggested improvements
+- Fix borrower mapping bug.
+- Emit `LoanDisbursed`.
+- Add reserve & bad debt protection.
+- Replace on-chain loops with pagination.
+- Mint vault shares instead of manual tracking.
+- Add thorough testing coverage.
 
-To run the deployment to Sepolia, you need an account with funds to send the transaction. The provided Hardhat configuration includes a Configuration Variable called `SEPOLIA_PRIVATE_KEY`, which you can use to set the private key of the account you want to use.
+---
 
-You can set the `SEPOLIA_PRIVATE_KEY` variable using the `hardhat-keystore` plugin or by setting it as an environment variable.
+## Testing
+Use Hardhat/Foundry with mock tokens.  
+Test deposit, withdraw, loan creation, disbursement, repayment, fees, pause, blacklist, reentrancy, and boundary cases.
 
-To set the `SEPOLIA_PRIVATE_KEY` config variable using `hardhat-keystore`:
+---
 
-```shell
-npx hardhat keystore set SEPOLIA_PRIVATE_KEY
-```
-
-After setting the variable, you can run the deployment with the Sepolia network:
-
-```shell
-npx hardhat ignition deploy --network sepolia ignition/modules/Counter.ts
-```
+## Final notes
+This README reflects the **exact supplied contract**.  
+Some logic (like borrowerLoans tracking) needs correction before production.  
+Treat as a robust, auditable foundation for Borderless Fuse Pay’s on-chain lending vault system.

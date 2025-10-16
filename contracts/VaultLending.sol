@@ -237,13 +237,16 @@ contract VaultLending {
     /* ========== LOAN FUNCTIONS ========== */
 
     function createLoan(bytes32 ref,address token, address merchant, uint256 principal,
-     uint256 fee, uint256 depositAmount)
+     uint256 fee, uint256 depositAmount, address borrower)
      external onlyCreditOfficer {
         require(pool[token] >= principal, "Insufficient pool liquidity");
+        require(whitelist[borrower], "Borrower not whitelisted");
+        require(whitelist[merchant], "Merchant not whitelisted");
+        require(vault[borrower][token] >= depositAmount, "Insufficient vault balance");
 
         Loan storage l = loans[ref];
         l.ref = ref;
-        l.borrower = msg.sender;
+        l.borrower = borrower;
         l.token = token;
         l.merchant = merchant;
         l.principal = principal;
@@ -266,7 +269,8 @@ contract VaultLending {
 
         // Disburse principal to borrower vault
         pool[token] -= principal;
-        vault[msg.sender][token] += principal;
+        //vault[msg.sender][token] += principal;
+        vault[msg.sender][token] -= depositAmount;
 
         emit LoanCreated(ref, msg.sender, principal, fee,depositAmount);
         //emit LoanDisbursed(ref, msg.sender, principal);

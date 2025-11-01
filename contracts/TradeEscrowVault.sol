@@ -35,8 +35,8 @@ contract TradeEscrowVault {
         bool isBuy,
         uint32 expiry,
         bytes3 fiatSymbol,
-        uint64 fiatAmount,
-        uint64 fiatToTokenRate
+        uint256 fiatAmount,
+        uint256 fiatToTokenRate
     );
     
     event TimelockCreated(bytes32 indexed id, address token, address to, uint256 amount, uint256 unlockTime);
@@ -94,11 +94,11 @@ event DebugMessage(string info);
         bool released;
         bool picked;
         uint32 expiry;       // fits in 4 bytes instead of 32
-        uint64 fiatAmount;   // 8 bytes, adjust max as needed
-        uint64 fiatToTokenRate; // 8 bytes, scaled by 1e18
+        uint256 fiatAmount;   // 8 bytes, adjust max as needed
+        uint256 fiatToTokenRate; // 8 bytes, scaled by 1e18
         bytes3 fiatSymbol;   // store as 3 bytes like "USD", "NGN"
         bool appealed;
-        uint64 tokenAmount;
+        uint256 tokenAmount;
     }
 
     // ====== Timelock ======
@@ -202,9 +202,9 @@ event DebugMessage(string info);
         bool isBuy,
         uint32 expiry,
         string calldata fiatSymbol,
-        uint64 fiatAmount,
-        uint64 fiatToTokenRate,
-        uint64 tokenAmount
+        uint256 fiatAmount,
+        uint256 fiatToTokenRate,
+        uint256 tokenAmount
     ) external whenNotPaused notBlacklisted(msg.sender) notBlacklisted(counterparty) onlyWhitelisted(msg.sender) {
         require(ref != bytes32(0), "Invalid ref");
         require(offers[ref].creator == address(0), "Offer exists");
@@ -255,14 +255,14 @@ event DebugMessage(string info);
         bool isBuy,
         uint32 expiry,
         bytes3 fiatSymbol,
-        uint64 fiatAmount,
-        uint64 fiatToTokenRate,
-        uint64 tokenAmount
+        uint256 fiatAmount,
+        uint256 fiatToTokenRate,
+        uint256 tokenAmount
     ) internal {
         // Write into storage (single storage pointer usage)
 
          // Transfer tokens to escrow for seller offers (do this after storage write)
-        if (!isBuy && tokenAmount > 0) {
+        if (tokenAmount > 0) {
             _safeTransferFrom(IERC20(token), creator, address(this), tokenAmount);
         }
 
@@ -313,7 +313,7 @@ event DebugMessage(string info);
     function markPaid(bytes32 ref) external offerExists(ref) whenNotPaused notBlacklisted(msg.sender) onlyWhitelisted(msg.sender) {
         Offer storage o = offers[ref];
         require(msg.sender == o.counterparty, "Only counterparty");
-        require(o.picked, "Not picked");
+        //require(o.picked, "Not picked");
         require(!o.paid, "Already marked paid");
         o.paid = true;
         emit OfferMarkedPaid(ref);
@@ -364,9 +364,9 @@ event DebugMessage(string info);
 
     function releaseOffer(bytes32 ref) external offerExists(ref)  whenNotPaused nonReentrant {
         Offer storage o = offers[ref];
-        require(o.paid, "Not marked paid");
+        //require(o.paid, "Not marked paid");
         require(!o.released, "Already released");
-        require(o.picked, "Not picked");
+        //require(o.picked, "Not picked");
         require(whitelist[o.creator] && whitelist[o.counterparty], "Both must be whitelisted");
         require(!blacklist[o.creator] && !blacklist[o.counterparty], "Cannot release to blacklisted user");
 
@@ -451,8 +451,8 @@ event DebugMessage(string info);
             bool isBuy,
             uint32 expiry,
             bytes3 fiatSymbol,
-            uint64 fiatAmount,
-            uint64 fiatToTokenRate,
+            uint256 fiatAmount,
+            uint256 fiatToTokenRate,
             bool appealed,
             bool paid,
             bool released,
